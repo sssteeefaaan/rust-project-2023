@@ -1,4 +1,4 @@
-use std::fs::{File};
+use std::fs::File;
 use std::io::{Read, Write, Error};
 
 pub fn convert_string_to_u8(content: &String) -> Vec<u8>{

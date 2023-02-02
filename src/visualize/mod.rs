@@ -3,10 +3,10 @@ use bevy::{prelude::*};
 use crate::maze::Maze;
 
 mod player;
-mod labyrinth;
+mod maze_visual;
 
 use player::PlayerPlugin;
-use labyrinth::LabyrinthPlugin;
+use maze_visual::MazeVisualPlugin;
 
 #[derive(Resource)]
 pub struct WinSize {
@@ -19,7 +19,8 @@ pub struct WinSize {
 struct GameTextures {
 	player: Handle<Image>,
     key: Handle<Image>,
-	font: Handle<Font>
+	font: Handle<Font>,
+	exit: Handle<Image>
 }
 const FONT_PATH: &str = "font.otf";
 
@@ -30,10 +31,18 @@ const PLAYER_ASSET_DIMENSIONS: (f32, f32) = (144., 75.);
 const KEY_SPRITE : &str = "key.png";
 const KEY_SCALE: f32 = 0.5;
 
+const EXIT_SPRITE : &str = "exit.png";
+
 const FRAME_SCALE: f32 = 0.1;
 const WALL_SCALE: f32 = 0.025;
+const DOOR_SCALE: f32 = 0.05;
 
 const BASE_SPEED: f32 = 500.;
+
+const FIELD_COLOR: &str = "DBCBEA";
+const WALL_COLOR: &str = "40315D";
+const DOOR_COLOR: &str = "248BB1";
+const SOLUTION_FIELD_COLOR: &str = "9DD6EA";
 
 pub fn display(maze: Option<Maze>){
     App::new()
@@ -46,7 +55,7 @@ pub fn display(maze: Option<Maze>){
     ..Default::default()
     }))
     .add_plugin(PlayerPlugin)
-    .add_plugin(LabyrinthPlugin{ maze_instance: maze })
+    .add_plugin(MazeVisualPlugin{ maze_instance: maze })
     .add_startup_system(setup_system)
 	.add_system(window_resize_system)
     .run();
@@ -76,7 +85,8 @@ fn setup_system(
 	let game_textures = GameTextures {
 		player: asset_server.load(PLAYER_SPRITE),
         key: asset_server.load(KEY_SPRITE),
-		font: asset_server.load(FONT_PATH)
+		font: asset_server.load(FONT_PATH),
+		exit: asset_server.load(EXIT_SPRITE)
 	};
 	commands.insert_resource(game_textures);
 }

@@ -2,7 +2,7 @@ use bevy::{prelude::*, sprite::{Anchor, collide_aabb::collide}};
 
 use crate::maze::state::UnlockDoor;
 
-use super::{WinSize, GameTextures, PLAYER_SCALE, labyrinth::{LabyrinthState, Collidable, CollidableType, Dimensions, CollidableDetails}, BASE_SPEED, PLAYER_ASSET_DIMENSIONS};
+use super::{WinSize, GameTextures, PLAYER_SCALE, maze_visual::{MazeVisualState, Collidable, CollidableType, Dimensions, CollidableDetails}, BASE_SPEED, PLAYER_ASSET_DIMENSIONS};
 
 pub struct PlayerPlugin;
 
@@ -21,22 +21,22 @@ pub struct Inventory;
 #[derive(Resource)]
 pub struct PlayerState {
     pub spawned: bool,
-    pub size: (f32, f32),
+    pub size: Vec2,
 }
 
 impl Default for PlayerState {
 	fn default() -> Self {
-		Self { spawned: false, size: (100., 50.) }
+		Self { spawned: false, size: Vec2::new(100., 50.) }
 	}
 }
 
 impl Plugin for PlayerPlugin{
     fn build(&self, app:&mut App){
         app.insert_resource(PlayerState::default())
-        .add_startup_system_to_stage(StartupStage::PostStartup, player_spawn_system.label("player-spawn"))
+        .add_startup_system_to_stage(StartupStage::PostStartup, player_spawn_system.label("player-spawn").after("labyrinth-spawn"))
         .add_startup_system_to_stage(StartupStage::PostStartup, setup_inventory_system.after("player-spawn"))
         .add_system(player_keyboard_event_system)
-        .add_system(player_movement_system.label("movement"))
+        .add_system(player_movement_system.label("movement").after("player-spawn"))
         .add_system(inventory_sync_system.after("movement"));
     }
 }
@@ -68,18 +68,18 @@ fn player_spawn_system(
 	mut player_state: ResMut<PlayerState>,
 	game_textures: Res<GameTextures>,
 	win_size: Res<WinSize>,
-    labyrinth: Res<LabyrinthState>
+    maze_visual_state: Res<MazeVisualState>
 ) {
-    let (w, h) = ((win_size.w - 2. * win_size.frame_size) / labyrinth.maze.dimensions.1 as f32, (win_size.h - 2. * win_size.frame_size) / labyrinth.maze.dimensions.0 as f32);
-    let (start_x, start_y) = (labyrinth.maze.start.1 as f32 * w, labyrinth.maze.start.0 as f32 * h);
+    let (w, h) = (maze_visual_state.field_dimensions.x, maze_visual_state.field_dimensions.y);
+    let (start_x, start_y) = (maze_visual_state.maze.start.1 as f32 * w, maze_visual_state.maze.start.0 as f32 * h);
     let p_size = PLAYER_ASSET_DIMENSIONS;//assets.get(&game_textures.player).un
-    player_state.size = (p_size.0 * PLAYER_SCALE, p_size.1 * PLAYER_SCALE);
+    player_state.size = Vec2::new(p_size.0 * PLAYER_SCALE, p_size.1 * PLAYER_SCALE);
     let pos = (start_x - win_size.w / 2. + win_size.frame_size + w/2., win_size.h / 2. - win_size.frame_size - start_y - h/2.);
         commands
             .spawn(SpriteBundle {
                 texture: game_textures.player.clone(),
                 sprite: Sprite{
-                    custom_size:Some(Vec2::new(player_state.size.0, player_state.size.1)),
+                    custom_size:Some(player_state.size.clone()),
                     anchor: Anchor::Center,
                     ..default()
                 },
@@ -95,7 +95,7 @@ fn player_spawn_system(
             })
             .insert(Player)
             .insert(Velocity { x: 0., y: 0. })
-            .insert(Dimensions::new(player_state.size.0, player_state.size.1, 0.));
+            .insert(Dimensions::new(player_state.size.x, player_state.size.y, 0.));
 
     player_state.spawned = true;
 }
@@ -103,7 +103,7 @@ fn player_spawn_system(
 fn player_movement_system(
     mut commands: Commands,
 	mut player: Query<(&Velocity, &mut Transform, &Dimensions), With<Player>>,
-    mut labyrinth_state: ResMut<LabyrinthState>,
+    mut maze_visual_state: ResMut<MazeVisualState>,
     coll_query: Query<(&Transform, &CollidableDetails), (With<Collidable>, Without<Player>)>,
     time: Res<Time>
 ) {
@@ -131,11 +131,11 @@ fn player_movement_system(
                 flag_x = match metadata.c_type{
                     CollidableType::Wall => false,
                     CollidableType::Door => {
-                        let my_position = labyrinth_state.maze.get_state_mut().position.clone();
+                        let my_position = maze_visual_state.maze.get_state_mut().position.clone();
                         let door_position = (my_position.0, (my_position.1 as i32 + velocity.x.signum() as i32) as usize);
-                        match labyrinth_state.maze.get_state_mut().unlock_door(&door_position){
+                        match maze_visual_state.maze.get_state_mut().unlock_door(&door_position){
                             UnlockDoor::Unlocked => {
-                                commands.entity(labyrinth_state.entities[metadata.id]).despawn();
+                                commands.entity(maze_visual_state.entities[metadata.id]).despawn();
                                 true
                             },
                             _ => {
@@ -144,15 +144,15 @@ fn player_movement_system(
                         }
                     },
                     CollidableType::Key => {
-                        labyrinth_state.maze.get_state_mut().collect_key(&metadata.position);
-                        commands.entity(labyrinth_state.entities[metadata.id]).despawn();
+                        maze_visual_state.maze.get_state_mut().collect_key(&metadata.position);
+                        commands.entity(maze_visual_state.entities[metadata.id]).despawn();
                         true
                     },
                     CollidableType::Exit => {
                         true
                     },
                     CollidableType::Field => {
-                        labyrinth_state.maze.get_state_mut().move_to(&metadata.position);
+                        maze_visual_state.maze.get_state_mut().move_to(&metadata.position);
                         true
                     }
                 };
@@ -165,11 +165,11 @@ fn player_movement_system(
                 flag_y = match metadata.c_type{
                     CollidableType::Wall => false,
                     CollidableType::Door => {
-                        let my_position = labyrinth_state.maze.get_state_mut().position.clone();
+                        let my_position = maze_visual_state.maze.get_state_mut().position.clone();
                         let door_position = ((my_position.0 as i32 - velocity.y.signum() as i32) as usize, my_position.1);
-                        match labyrinth_state.maze.get_state_mut().unlock_door(&door_position){
+                        match maze_visual_state.maze.get_state_mut().unlock_door(&door_position){
                             UnlockDoor::Unlocked =>{
-                                commands.entity(labyrinth_state.entities[metadata.id]).despawn();
+                                commands.entity(maze_visual_state.entities[metadata.id]).despawn();
                                 true
                             },
                             _ => {
@@ -178,26 +178,28 @@ fn player_movement_system(
                         }
                     },
                     CollidableType::Key => {
-                        labyrinth_state.maze.get_state_mut().collect_key(&metadata.position);
-                        commands.entity(labyrinth_state.entities[metadata.id]).despawn();
+                        maze_visual_state.maze.get_state_mut().collect_key(&metadata.position);
+                        commands.entity(maze_visual_state.entities[metadata.id]).despawn();
                         true
                     },
                     CollidableType::Exit => {
                         true
                     },
                     CollidableType::Field => {
-                        labyrinth_state.maze.get_state_mut().move_to(&metadata.position);
+                        maze_visual_state.maze.get_state_mut().move_to(&metadata.position);
                         true
                     }
                 };
             }
         }
+        let player_top_left = (translation.x + dx - player_dim.x / 2., translation.y + dy + player_dim.y / 2.);
+        let player_bottom_right = (translation.x + dx + player_dim.x / 2., translation.y + dy - player_dim.y / 2.);
 
-        if flag_x{
+        if flag_x && player_bottom_right.0 <= maze_visual_state.size.x / 2. && player_top_left.0 >= -maze_visual_state.size.x / 2.{
 		    translation.x += dx;
         }
 
-        if flag_y{
+        if flag_y && player_top_left.1 <= maze_visual_state.size.y / 2. && player_bottom_right.1 >= -maze_visual_state.size.y / 2.{
 		    translation.y += dy;
         }
     }
@@ -206,7 +208,7 @@ fn player_movement_system(
 fn inventory_sync_system(
     query: Query<Entity, With<Inventory>>,
     mut commands: Commands,
-    mut labyrinth_state: ResMut<LabyrinthState>,
+    mut maze_visual_state: ResMut<MazeVisualState>,
     game_textures: Res<GameTextures>
 ){
     for e in query.iter(){
@@ -214,7 +216,7 @@ fn inventory_sync_system(
         .entity(e)
         .insert(TextBundle{
             text: Text::from_section(
-                format!("   Keys: {}", labyrinth_state.maze.get_state_mut().keys),
+                format!("   Keys: {}", maze_visual_state.maze.get_state_mut().keys),
                 TextStyle {
                     font_size: 30.,
                     color: Color::rgb(0.,0.,0.),
@@ -230,13 +232,13 @@ fn inventory_sync_system(
 fn setup_inventory_system(
     mut commands: Commands,
     game_textures: Res<GameTextures>,
-    mut labyrinth_state: ResMut<LabyrinthState>
+    mut maze_visual_state: ResMut<MazeVisualState>
 ){
     commands.spawn_empty()
     .insert(Inventory)
     .insert(TextBundle{
         text: Text::from_section(
-            format!("   Keys: {}", labyrinth_state.maze.get_state_mut().keys),
+            format!("   Keys: {}", maze_visual_state.maze.get_state_mut().keys),
             TextStyle {
                 font_size: 30.,
                 color: Color::rgb(0.,0.,0.),

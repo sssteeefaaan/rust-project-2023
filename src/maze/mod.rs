@@ -1,7 +1,7 @@
 pub mod field;
 pub mod state;
 
-use std::{fmt::Display, io::{Error, ErrorKind}, collections::{HashMap, HashSet, VecDeque}, thread, sync::{Mutex, Arc, mpsc}};
+use std::{fmt::Display, io::{Error, ErrorKind}, collections::{HashMap, HashSet, VecDeque}, thread::spawn, sync::{Mutex, Arc, mpsc}};
 
 use crate::{utilities::read_binary};
 use field::Field;
@@ -126,14 +126,17 @@ impl Maze{
                 ret.insert((row_index, col_index), HashSet::new());
                 for (direction, door) in field.doors.iter().enumerate(){
                     if *door{
-                        ret.get_mut(&(row_index, col_index)).unwrap().insert(
-                            match direction{
-                                0 => (row_index, col_index - 1),
-                                1 => (row_index, col_index + 1),
-                                2 => (row_index - 1, col_index),
-                                _ => (row_index + 1, col_index)
-                            }
-                        );
+                        let neighbour = 
+                        match direction{
+                                0 if col_index > 0 => Some((row_index, col_index - 1)),
+                                1 if col_index + 1 < self.dimensions.1 => Some((row_index, col_index + 1)),
+                                2 if row_index > 0 => Some((row_index - 1, col_index)),
+                                3 if row_index + 1 < self.dimensions.0 => Some((row_index + 1, col_index)),
+                                _ => None
+                        };
+                        if neighbour.is_some(){
+                            ret.get_mut(&(row_index, col_index)).unwrap().insert(neighbour.unwrap());
+                        }
                     }
                 }
             }
@@ -150,20 +153,63 @@ impl Maze{
                 ret.insert((row_index, col_index), HashSet::new());
                 for (direction, wall) in field.walls.iter().enumerate(){
                     if !*wall{
-                        ret.get_mut(&(row_index, col_index)).unwrap().insert(
-                            match direction{
-                                0 => (row_index, col_index - 1),
-                                1 => (row_index, col_index + 1),
-                                2 => (row_index - 1, col_index),
-                                _ => (row_index + 1, col_index)
-                            }
-                        );
+                        let neighbour = 
+                        match direction{
+                            0 if col_index > 0 => Some((row_index, col_index - 1)),
+                            1 if col_index + 1 < self.dimensions.1 => Some((row_index, col_index + 1)),
+                            2 if row_index > 0 => Some((row_index - 1, col_index)),
+                            3 if row_index + 1 < self.dimensions.0 => Some((row_index + 1, col_index)),
+                            _ => None
+                        };
+                        if neighbour.is_some(){
+                            ret.get_mut(&(row_index, col_index)).unwrap().insert(neighbour.unwrap());
+                        }
                     }
                 }
             }
         }
 
         return ret;
+    }
+
+    #[allow(dead_code)]
+    pub fn get_direct_neighbours(&self, position: &(usize, usize))->HashSet<(usize, usize)>{
+        let mut ret = HashSet::new();
+        for (i, w) in self.fields[position.0][position.1].walls.iter().enumerate(){
+            if !*w{
+                let res = match i {
+                    0 if position.1 > 0 => Some((position.0, position.1 - 1)),
+                    1 if position.1 + 1 < self.dimensions.1 => Some((position.0, position.1 + 1)),
+                    2 if position.0 > 0 => Some((position.0 - 1, position.1 )),
+                    3 if position.0 + 1 < self.dimensions.0 => Some((position.0 + 1, position.1)),
+                    _ => None
+                };
+                if res.is_some(){
+                    ret.insert(res.unwrap());
+                }
+            }
+        }
+        ret
+    }
+
+    #[allow(dead_code)]
+    pub fn get_door_neighbours(&self, position: &(usize, usize))->HashSet<(usize, usize)>{
+        let mut ret = HashSet::new();
+        for (i, d) in self.fields[position.0][position.1].doors.iter().enumerate(){
+            if *d{
+                let res = match i {
+                    0 if position.1 > 0 => Some((position.0, position.1 - 1)),
+                    1 if position.1 + 1 < self.dimensions.1 => Some((position.0, position.1 + 1)),
+                    2 if position.0 > 0 => Some((position.0 - 1, position.1 )),
+                    3 if position.0 + 1 < self.dimensions.0 => Some((position.0 + 1, position.1)),
+                    _ => None
+                };
+                if res.is_some(){
+                    ret.insert(res.unwrap());
+                }
+            }
+        }
+        ret
     }
 
     pub fn get_keys_set(&self) -> HashSet<(usize, usize)>{
@@ -180,13 +226,11 @@ impl Maze{
         return ret;
     }
 
-    #[allow(dead_code)]
-    fn search_for_shortest_path(&self)->Option<Vec<(usize, usize)>>{
-        if self.exits.contains(&self.start){ return Some(vec![self.start]); }
+    pub fn search_for_shortest_path(&self, state: State) -> Option<Vec<(usize, usize)>>{
+        if self.exits.contains(&state.position){ return Some(vec![state.position]); }
 
         let walls_graph = self.get_walls_graph();
 
-        let state = State::create_from_maze(self);
         let mut state_history = Vec::new();
         state_history.push(state);
 
@@ -236,7 +280,7 @@ impl Maze{
 
         while !queue.lock().unwrap().is_empty(){
             let current_history = queue.lock().unwrap().pop_front().unwrap();
-            let current_state = current_history.last().unwrap();
+            let current_state = Arc::new(current_history.last().unwrap().clone());
             let current_position = current_state.position;
 
             let neighbours = walls_graph.get(&current_position).unwrap();
@@ -246,12 +290,13 @@ impl Maze{
 
             for node in neighbours{
                 let mut new_history = current_history.clone();
+                let new_state = current_state.clone();
                 let node_copy = node.clone();
                 let exists = self.exits.clone();
                 let queue_copy = queue.clone();
                 let solutions = tx.clone();
-                threads.push(thread::spawn(move ||{
-                    let potential_new_state = new_history.last().unwrap().transfer_state(&node_copy);
+                threads.push(spawn(move ||{
+                    let potential_new_state = new_state.transfer_state(&node_copy);
                     if let Some(new_state) = potential_new_state{
                         if !new_history.contains(&new_state){
                             new_history.push(new_state);

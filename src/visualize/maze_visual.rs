@@ -2,14 +2,14 @@ use bevy::{prelude::*, sprite::Anchor};
 
 use crate::maze::Maze;
 
-use super::{WinSize, GameTextures, WALL_SCALE, KEY_SCALE};
+use super::{WinSize, GameTextures, WALL_SCALE, DOOR_SCALE, KEY_SCALE, DOOR_COLOR, FIELD_COLOR, WALL_COLOR, SOLUTION_FIELD_COLOR};
 
-pub struct LabyrinthPlugin{
+pub struct MazeVisualPlugin{
     pub maze_instance: Option<Maze>
 }
 
 #[derive(Component)]
-pub struct Labyrinth;
+pub struct MazeVisual;
 
 #[derive(Component)]
 pub struct Field;
@@ -51,20 +51,15 @@ impl Dimensions{
 }
 
 #[derive(Resource)]
-pub struct FieldState{
-    pub index: (u8,u8),
-    pub key: bool,
-    pub walls: (bool, bool, bool, bool)
-}
-
-#[derive(Resource)]
-pub struct LabyrinthState{
+pub struct MazeVisualState{
     pub maze: Maze,
     pub entities: Vec<Entity>,
-    pub showing_solution: bool
+    pub showing_solution: bool,
+    pub size: Vec2,
+    pub field_dimensions: Vec2
 }
 
-impl Default for LabyrinthState {
+impl Default for MazeVisualState {
 	fn default() -> Self {
         Self {
             maze: match Maze::parse_from_file(&"primer.bin".to_string()){
@@ -72,12 +67,14 @@ impl Default for LabyrinthState {
                 Err(_)=> Maze::default()
             },
             entities: Vec::<Entity>::new(),
-            showing_solution: false
+            showing_solution: false,
+            size: Vec2::default(),
+            field_dimensions: Vec2::default()
         }
 	}
 }
 
-impl LabyrinthState{
+impl MazeVisualState{
     fn from_maze(maze: Option<Maze>) -> Self{
         if maze.is_some(){
             Self{
@@ -90,9 +87,9 @@ impl LabyrinthState{
     }
 }
 
-impl Plugin for LabyrinthPlugin{
+impl Plugin for MazeVisualPlugin{
     fn build(&self, app:&mut App){
-        app.insert_resource(LabyrinthState::from_maze(self.maze_instance.clone()))
+        app.insert_resource(MazeVisualState::from_maze(self.maze_instance.clone()))
         .add_startup_system_to_stage(StartupStage::PostStartup, labyrinth_spawn_system.label("labyrinth-spawn"))
         //.add_startup_system_to_stage(StartupStage::PostStartup, solution_system.after("labyrinth-spawn"))
         .add_system(keyboard_event_system);
@@ -101,17 +98,17 @@ impl Plugin for LabyrinthPlugin{
 
 fn labyrinth_spawn_system(
 	mut commands: Commands,
-    mut ls: ResMut<LabyrinthState>,
+    mut maze_visual_state: ResMut<MazeVisualState>,
     game_textures: Res<GameTextures>,
 	win_size: Res<WinSize>,
 ) {
     let frame_size = win_size.frame_size;
 
-    let start_w = win_size.w - 2. * frame_size;
-    let start_h = win_size.h - 2. * frame_size;
+    maze_visual_state.size = Vec2::new(win_size.w - 2. * frame_size, win_size.h - 2. * frame_size);
+    maze_visual_state.field_dimensions = Vec2::new(maze_visual_state.size.x / maze_visual_state.maze.dimensions.1 as f32, maze_visual_state.size.y / maze_visual_state.maze.dimensions.0 as f32);
 
-    let w = start_w / ls.maze.dimensions.1 as f32;
-    let h = start_h / ls.maze.dimensions.0 as f32;
+    let (start_w, start_h) = (maze_visual_state.size.x, maze_visual_state.size.y);
+    let (w, h) = (maze_visual_state.field_dimensions.x, maze_visual_state.field_dimensions.y);
 
     let key_size = (w * KEY_SCALE, h * KEY_SCALE);
 
@@ -119,12 +116,12 @@ fn labyrinth_spawn_system(
     let wall_width = w;
     let wall_height = h;
 
-    let door_size = wall_size;
+    let door_size = w.min(h) * DOOR_SCALE;
     let door_width = w;
     let door_height = h;
 
-    let door_color = Color::rgb(0.9, 1., 0.);
-    let wall_color = Color::rgb(0., 0.8, 1.);
+    let door_color = Color::hex(DOOR_COLOR).unwrap();
+    let wall_color = Color::hex(WALL_COLOR).unwrap();
 
     let horizontal_wall = Sprite{
         color: wall_color.clone(),
@@ -156,7 +153,7 @@ fn labyrinth_spawn_system(
 
     let mut children = Vec::<Entity>::new();
 
-    for (y, row) in ls.maze.fields.iter().enumerate(){
+    for (y, row) in maze_visual_state.maze.fields.iter().enumerate(){
         for(x, field) in row.iter().enumerate(){
             if field.walls[0]{
                 let cd = CollidableDetails{
@@ -263,7 +260,7 @@ fn labyrinth_spawn_system(
                             sprite: vertical_door.clone(),
                             transform: Transform::
                                 from_translation(Vec3 {
-                                    x: x as f32 * w - start_w / 2.,
+                                    x: x as f32 * w - start_w / 2. - door_size / 2.,
                                     y: start_h / 2. - y as f32 * h,
                                     z: 5.
                             }),
@@ -286,8 +283,8 @@ fn labyrinth_spawn_system(
                             sprite: vertical_door.clone(),
                             transform: Transform::
                                 from_translation(Vec3 {
-                                    x: (x + 1) as f32 * w - start_w / 2. - door_size,
-                                    y: start_h / 2. + y as f32 * h,
+                                    x: (x + 1) as f32 * w - start_w / 2. - door_size / 2.,
+                                    y: start_h / 2. - y as f32 * h,
                                     z: 5.
                             }),
                             ..Default::default()
@@ -310,7 +307,7 @@ fn labyrinth_spawn_system(
                             transform: Transform::
                                 from_translation(Vec3 {
                                     x: x as f32 * w - start_w / 2.,
-                                    y: start_h / 2. - y as f32 * h,
+                                    y: start_h / 2. - y as f32 * h + door_size / 2.,
                                     z: 5.
                             }),
                             ..Default::default()
@@ -333,7 +330,7 @@ fn labyrinth_spawn_system(
                             transform: Transform::
                                 from_translation(Vec3 {
                                     x: x as f32 * w - start_w / 2.,
-                                    y: start_h / 2. - (y + 1) as f32 * h + door_size,
+                                    y: start_h / 2. - (y + 1) as f32 * h + door_size / 2.,
                                     z: 5.
                             }),
                             ..Default::default()
@@ -355,13 +352,13 @@ fn labyrinth_spawn_system(
                         SpriteBundle {
                             texture: game_textures.key.clone(),
                             sprite: Sprite{
-                                anchor: Anchor::TopLeft,
+                                anchor: Anchor::Center,
                                 custom_size: Some(Vec2::new(key_size.0, key_size.1)),
                                 ..Default::default()
                             },
                             transform: Transform::from_translation(Vec3 {
-                                x: x as f32 * w - start_w / 2. + key_size.0 / 2.,
-                                y: start_h / 2. - y as f32 * h - key_size.1 / 2.,
+                                x: x as f32 * w - start_w / 2. + w / 2.,
+                                y: start_h / 2. - y as f32 * h - h / 2.,
                                 z: 5.
                             }),
                             ..Default::default()
@@ -374,21 +371,21 @@ fn labyrinth_spawn_system(
             if field.exit{
                 let cd = CollidableDetails{
                     id: children.len(),
-                    dim:Dimensions::new(w, h, 0.),
+                    dim: Dimensions::new(key_size.0, key_size.1, 0.),
                     c_type: CollidableType::Exit,
                     position:(y, x)
                 };
                 children.push(
                     commands.spawn(SpriteBundle {
+                            texture: game_textures.exit.clone(),
                             sprite: Sprite{
-                                color: Color::rgb(0.,0.9,0.),
-                                custom_size: Some(Vec2::new(w, h)),
-                                anchor: Anchor::TopLeft,
+                                custom_size: Some(Vec2::new(key_size.0, key_size.1)),
+                                anchor: Anchor::Center,
                                 ..Default::default()
                             },
                             transform: Transform::from_translation(Vec3 {
-                                x: x as f32 * w - start_w / 2.,
-                                y: start_h / 2. - y as f32 * h,
+                                x: x as f32 * w - start_w / 2. + w / 2.,
+                                y: start_h / 2. - y as f32 * h - h / 2.,
                                 z: 3.
                             }),
                             ..Default::default()
@@ -400,7 +397,7 @@ fn labyrinth_spawn_system(
 
             children.push(commands.spawn(SpriteBundle {
                 sprite: Sprite{
-                    color: Color::rgb(0.8,0.4,0.9),
+                    color: Color::hex(FIELD_COLOR).unwrap(),
                     custom_size: Some(Vec2::new(w, h)),
                     anchor: Anchor::Center,
                     ..Default::default()
@@ -423,7 +420,7 @@ fn labyrinth_spawn_system(
         );
         }
     }
-    ls.entities = children;
+    maze_visual_state.entities = children;
 
     commands.spawn_empty()
     .insert(TextBundle{
@@ -442,34 +439,33 @@ fn labyrinth_spawn_system(
 
 fn solution_system(
     mut commands: Commands,
-    win_size: Res<WinSize>,
     game_textures: Res<GameTextures>,
-    mut labyrinth_state: ResMut<LabyrinthState>) -> Vec<Entity>
+    mut maze_visual_state: ResMut<MazeVisualState>) -> Vec<Entity>
     {
-    let (w, h) = ((win_size.w - 2. * win_size.frame_size) / labyrinth_state.maze.dimensions.1 as f32, (win_size.h - 2. * win_size.frame_size) / labyrinth_state.maze.dimensions.0 as f32);
-    let (tile_w, tile_h) = (w, h);
+    let (w, h) = (maze_visual_state.field_dimensions.x, maze_visual_state.field_dimensions.y);
+    let (start_w, start_h) = (maze_visual_state.size.x, maze_visual_state.size.y);
     let sol_sprite = Sprite{
-        color: Color::rgb(0.3, 0.2, 0.8),
-        custom_size: Some(Vec2::new(tile_w, tile_h)),
+        color: Color::hex(SOLUTION_FIELD_COLOR).unwrap(),
+        custom_size: Some(Vec2::new(w, h)),
         anchor: Anchor::Center,
         ..default()
     };
-    let state = labyrinth_state.maze.get_state_mut().clone();
-    let solution = labyrinth_state.maze.search_for_shortest_path_parallel(state);
+    let state = maze_visual_state.maze.get_state_mut().clone();
+    let solution = maze_visual_state.maze.search_for_shortest_path_parallel(state);
     let mut spawned = Vec::new();
     if solution.is_some(){
         for step in solution.unwrap(){
             spawned.push(commands.spawn(SpriteBundle{
                 transform: Transform::from_translation(Vec3::new(
-                    step.1 as f32 * tile_w - (win_size.w - 2. * win_size.frame_size - w) / 2.,
-                    (win_size.h - 2. * win_size.frame_size - h) / 2. - step.0 as f32 * tile_h ,
+                    step.1 as f32 * w - (start_w - w) / 2.,
+                    (start_h - h) / 2. - step.0 as f32 * h,
                     2.
                 )),
                 sprite: sol_sprite.clone(),
                 ..default()
             })
             .insert(Visibility{
-                is_visible: labyrinth_state.showing_solution
+                is_visible: maze_visual_state.showing_solution
             })
             .insert(Solution).id());
         }
@@ -477,7 +473,7 @@ fn solution_system(
         spawned.push(commands.spawn_empty()
         .insert(TextBundle{
             text: Text::from_section(
-                "No solution found for this maze...",
+                "   No solution found for this maze...",
                 TextStyle {
                     font_size: 30.,
                     color: Color::rgb(0.,0.,0.),
@@ -487,7 +483,7 @@ fn solution_system(
             z_index: ZIndex::Global(30),
             ..default()
         }).insert(Visibility{
-            is_visible: labyrinth_state.showing_solution
+            is_visible: maze_visual_state.showing_solution
         })
         .insert(Solution).id());
     }
@@ -498,15 +494,14 @@ fn solution_system(
 fn keyboard_event_system(
     mut commands: Commands,
     kb: Res<Input<KeyCode>>,
-    win_size: Res<WinSize>,
     game_textures: Res<GameTextures>,
-    mut labyrinth_state: ResMut<LabyrinthState>,
+    mut maze_visual_state: ResMut<MazeVisualState>,
     query: Query<Entity, With<Solution>>
 ){
     if kb.just_pressed(KeyCode::S){
-        labyrinth_state.showing_solution = !labyrinth_state.showing_solution;
-        if labyrinth_state.showing_solution{
-            solution_system(commands, win_size, game_textures, labyrinth_state);
+        maze_visual_state.showing_solution = !maze_visual_state.showing_solution;
+        if maze_visual_state.showing_solution{
+            solution_system(commands, game_textures, maze_visual_state);
         }else{
             for e in query.iter(){
                 commands.entity(e).despawn();

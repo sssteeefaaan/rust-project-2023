@@ -86,6 +86,6 @@ impl Hash for State{
 
 impl PartialEq for State{
     fn eq(&self, other: &Self) -> bool {
-        return self.position == other.position && self.keys == other.keys;
+        self.position == other.position && self.keys == other.keys
     }
 }
