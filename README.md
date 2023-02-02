@@ -10,5 +10,5 @@
 <ul>
   <li>Projekat se oslanja na <a href="https://bevyengine.org/">Bevy alat</a> za rad sa grafičkim interfejsom</li>
   <li>Neophodno je imati instalirane pakete <code>rust-alsa-sys-devel</code> i <code>rust-libudev-devel</code> kako bi Bevy funkcionisao</li>
-  <li>U okviru foldera <em>primer.txt</em> je moguće specificirati lavirint kao u specifikaciji projekta.</li>
+  <li>U okviru fajla <strong><em>primer.txt</em></strong> je moguće specificirati lavirint u formatu opisanom u okviru Projektne specifikacije</li>
 </ul>
