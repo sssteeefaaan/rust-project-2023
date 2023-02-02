@@ -25,7 +25,8 @@ pub enum CollidableType{
     Wall,
     Door,
     Key,
-    Exit
+    Exit,
+    Field
 }
 
 #[derive(Component)]
@@ -39,7 +40,8 @@ pub struct Dimensions{
 pub struct CollidableDetails{
     pub id: usize,
     pub dim: Dimensions,
-    pub c_type: CollidableType
+    pub c_type: CollidableType,
+    pub position: (usize, usize)
 }
 
 impl Dimensions{
@@ -92,7 +94,7 @@ impl Plugin for LabyrinthPlugin{
     fn build(&self, app:&mut App){
         app.insert_resource(LabyrinthState::from_maze(self.maze_instance.clone()))
         .add_startup_system_to_stage(StartupStage::PostStartup, labyrinth_spawn_system.label("labyrinth-spawn"))
-        .add_startup_system_to_stage(StartupStage::PostStartup, solution_system.after("labyrinth-spawn"))
+        //.add_startup_system_to_stage(StartupStage::PostStartup, solution_system.after("labyrinth-spawn"))
         .add_system(keyboard_event_system);
     }
 }
@@ -160,7 +162,8 @@ fn labyrinth_spawn_system(
                 let cd = CollidableDetails{
                     id: children.len(),
                     dim:Dimensions::new(wall_size, wall_height, 0.),
-                    c_type: CollidableType::Wall
+                    c_type: CollidableType::Wall,
+                    position:(y, x)
                 };
                 children.push(
                     commands.spawn(
@@ -182,7 +185,8 @@ fn labyrinth_spawn_system(
                 let cd = CollidableDetails{
                     id: children.len(),
                     dim:Dimensions::new(wall_size, wall_height, 0.),
-                    c_type: CollidableType::Wall
+                    c_type: CollidableType::Wall,
+                    position:(y, x)
                 };
                 children.push(
                     commands.spawn(
@@ -204,7 +208,8 @@ fn labyrinth_spawn_system(
                 let cd = CollidableDetails{
                     id: children.len(),
                     dim:Dimensions::new(wall_width, wall_size, 0.),
-                    c_type: CollidableType::Wall
+                    c_type: CollidableType::Wall,
+                    position:(y, x)
                 };
                 children.push(
                     commands.spawn(
@@ -226,7 +231,8 @@ fn labyrinth_spawn_system(
                 let cd = CollidableDetails{
                     id: children.len(),
                     dim:Dimensions::new(wall_width, wall_size, 0.),
-                    c_type: CollidableType::Wall
+                    c_type: CollidableType::Wall,
+                    position:(y, x)
                 };
                 children.push(
                     commands.spawn(
@@ -248,7 +254,8 @@ fn labyrinth_spawn_system(
                 let cd = CollidableDetails{
                     id: children.len(),
                     dim:Dimensions::new(door_size, door_height, 0.),
-                    c_type: CollidableType::Door
+                    c_type: CollidableType::Door,
+                    position:(y, x)
                 };
                 children.push(
                     commands.spawn(
@@ -270,7 +277,8 @@ fn labyrinth_spawn_system(
                 let cd = CollidableDetails{
                     id: children.len(),
                     dim:Dimensions::new(door_size, door_height, 0.),
-                    c_type: CollidableType::Door
+                    c_type: CollidableType::Door,
+                    position:(y, x)
                 };
                 children.push(
                     commands.spawn(
@@ -292,7 +300,8 @@ fn labyrinth_spawn_system(
                 let cd = CollidableDetails{
                     id: children.len(),
                     dim:Dimensions::new(door_width, door_size, 0.),
-                    c_type: CollidableType::Door
+                    c_type: CollidableType::Door,
+                    position:(y, x)
                 };
                 children.push(
                     commands.spawn(
@@ -314,7 +323,8 @@ fn labyrinth_spawn_system(
                 let cd = CollidableDetails{
                     id: children.len(),
                     dim:Dimensions::new(door_width, door_size, 0.),
-                    c_type: CollidableType::Door
+                    c_type: CollidableType::Door,
+                    position:(y, x)
                 };
                 children.push(
                     commands.spawn(
@@ -337,7 +347,8 @@ fn labyrinth_spawn_system(
                 let cd = CollidableDetails{
                     id: children.len(),
                     dim:Dimensions::new(key_size.0, key_size.1, 0.),
-                    c_type: CollidableType::Key
+                    c_type: CollidableType::Key,
+                    position:(y, x)
                 };
                 children.push(
                     commands.spawn(
@@ -364,7 +375,8 @@ fn labyrinth_spawn_system(
                 let cd = CollidableDetails{
                     id: children.len(),
                     dim:Dimensions::new(w, h, 0.),
-                    c_type: CollidableType::Exit
+                    c_type: CollidableType::Exit,
+                    position:(y, x)
                 };
                 children.push(
                     commands.spawn(SpriteBundle {
@@ -385,6 +397,30 @@ fn labyrinth_spawn_system(
                         .id()
                     );
             }
+
+            children.push(commands.spawn(SpriteBundle {
+                sprite: Sprite{
+                    color: Color::rgb(0.8,0.4,0.9),
+                    custom_size: Some(Vec2::new(w, h)),
+                    anchor: Anchor::Center,
+                    ..Default::default()
+                },
+                transform: Transform::from_translation(Vec3 {
+                    x: x as f32 * w - start_w / 2. + w/2.,
+                    y: start_h / 2. - y as f32 * h - h/2.,
+                    z: 1.
+                }),
+                ..Default::default()
+            })
+            .insert(Collidable)
+                .insert(CollidableDetails{
+                    id: children.len(),
+                    dim:Dimensions::new(w * 0.1, h * 0.1, 0.),
+                    c_type: CollidableType::Field,
+                    position:(y, x)
+                })
+                .id()
+        );
         }
     }
     ls.entities = children;
@@ -402,59 +438,79 @@ fn labyrinth_spawn_system(
         z_index: ZIndex::Global(30),
         ..default()
     });
-
-    commands.spawn(
-        SpriteBundle{
-            sprite: Sprite {
-                color: Color::rgb(0.8,0.4,0.9),
-                custom_size: Some(Vec2::new(start_w, start_h)),
-                ..Default::default()
-            },
-            transform: Transform::from_translation(Vec3 { x: 0., y: 0., z: 1. }),
-            ..Default::default()
-        });
 }
 
 fn solution_system(
     mut commands: Commands,
     win_size: Res<WinSize>,
-    mut labyrinth_state: ResMut<LabyrinthState>)
+    game_textures: Res<GameTextures>,
+    mut labyrinth_state: ResMut<LabyrinthState>) -> Vec<Entity>
     {
-    let (w, h) = ((win_size.w - 2. * win_size.frame_size)/labyrinth_state.maze.dimensions.1 as f32, (win_size.h - 2. * win_size.frame_size) / labyrinth_state.maze.dimensions.0 as f32);
+    let (w, h) = ((win_size.w - 2. * win_size.frame_size) / labyrinth_state.maze.dimensions.1 as f32, (win_size.h - 2. * win_size.frame_size) / labyrinth_state.maze.dimensions.0 as f32);
     let (tile_w, tile_h) = (w, h);
     let sol_sprite = Sprite{
-        color: Color::rgba(0.3, 0.2, 0.8, 0.5),
+        color: Color::rgb(0.3, 0.2, 0.8),
         custom_size: Some(Vec2::new(tile_w, tile_h)),
         anchor: Anchor::Center,
         ..default()
     };
-    let solution = labyrinth_state.maze.get_shortest_path();
-    for step in solution{
-        commands.spawn(SpriteBundle{
-            transform: Transform::from_translation(Vec3::new(
-                step.1 as f32 * tile_w - (win_size.w - 2. * win_size.frame_size - w) / 2.,
-                (win_size.h - 2. * win_size.frame_size - h) / 2. - step.0 as f32 * tile_h ,
-                2.
-            )),
-            sprite: sol_sprite.clone(),
+    let state = labyrinth_state.maze.get_state_mut().clone();
+    let solution = labyrinth_state.maze.search_for_shortest_path_parallel(state);
+    let mut spawned = Vec::new();
+    if solution.is_some(){
+        for step in solution.unwrap(){
+            spawned.push(commands.spawn(SpriteBundle{
+                transform: Transform::from_translation(Vec3::new(
+                    step.1 as f32 * tile_w - (win_size.w - 2. * win_size.frame_size - w) / 2.,
+                    (win_size.h - 2. * win_size.frame_size - h) / 2. - step.0 as f32 * tile_h ,
+                    2.
+                )),
+                sprite: sol_sprite.clone(),
+                ..default()
+            })
+            .insert(Visibility{
+                is_visible: labyrinth_state.showing_solution
+            })
+            .insert(Solution).id());
+        }
+    }else{
+        spawned.push(commands.spawn_empty()
+        .insert(TextBundle{
+            text: Text::from_section(
+                "No solution found for this maze...",
+                TextStyle {
+                    font_size: 30.,
+                    color: Color::rgb(0.,0.,0.),
+                    font: game_textures.font.clone()
+                }
+            ),
+            z_index: ZIndex::Global(30),
             ..default()
-        })
-        .insert(Visibility{
+        }).insert(Visibility{
             is_visible: labyrinth_state.showing_solution
         })
-        .insert(Solution);
+        .insert(Solution).id());
     }
+
+    return spawned;
 }
 
 fn keyboard_event_system(
+    mut commands: Commands,
     kb: Res<Input<KeyCode>>,
+    win_size: Res<WinSize>,
+    game_textures: Res<GameTextures>,
     mut labyrinth_state: ResMut<LabyrinthState>,
-    mut solution: Query<&mut Visibility, With<Solution>>,
+    query: Query<Entity, With<Solution>>
 ){
     if kb.just_pressed(KeyCode::S){
         labyrinth_state.showing_solution = !labyrinth_state.showing_solution;
-        for mut v in solution.iter_mut(){
-            v.is_visible = labyrinth_state.showing_solution;
+        if labyrinth_state.showing_solution{
+            solution_system(commands, win_size, game_textures, labyrinth_state);
+        }else{
+            for e in query.iter(){
+                commands.entity(e).despawn();
+            }
         }
     }
 }

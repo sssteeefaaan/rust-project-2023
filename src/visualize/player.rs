@@ -1,5 +1,7 @@
 use bevy::{prelude::*, sprite::{Anchor, collide_aabb::collide}};
 
+use crate::maze::state::UnlockDoor;
+
 use super::{WinSize, GameTextures, PLAYER_SCALE, labyrinth::{LabyrinthState, Collidable, CollidableType, Dimensions, CollidableDetails}, BASE_SPEED, PLAYER_ASSET_DIMENSIONS};
 
 pub struct PlayerPlugin;
@@ -18,15 +20,13 @@ pub struct Inventory;
 
 #[derive(Resource)]
 pub struct PlayerState {
-	pub position: (usize, usize),
     pub spawned: bool,
     pub size: (f32, f32),
-    pub key_number: usize
 }
 
 impl Default for PlayerState {
 	fn default() -> Self {
-		Self { position: (0, 0), spawned: false, size: (100., 50.), key_number: 0 }
+		Self { spawned: false, size: (100., 50.) }
 	}
 }
 
@@ -74,7 +74,6 @@ fn player_spawn_system(
     let (start_x, start_y) = (labyrinth.maze.start.1 as f32 * w, labyrinth.maze.start.0 as f32 * h);
     let p_size = PLAYER_ASSET_DIMENSIONS;//assets.get(&game_textures.player).un
     player_state.size = (p_size.0 * PLAYER_SCALE, p_size.1 * PLAYER_SCALE);
-    player_state.position = (labyrinth.maze.start.0, labyrinth.maze.start.1);
     let pos = (start_x - win_size.w / 2. + win_size.frame_size + w/2., win_size.h / 2. - win_size.frame_size - start_y - h/2.);
         commands
             .spawn(SpriteBundle {
@@ -104,8 +103,7 @@ fn player_spawn_system(
 fn player_movement_system(
     mut commands: Commands,
 	mut player: Query<(&Velocity, &mut Transform, &Dimensions), With<Player>>,
-    mut player_state: ResMut<PlayerState>,
-    labyrinth_state: Res<LabyrinthState>,
+    mut labyrinth_state: ResMut<LabyrinthState>,
     coll_query: Query<(&Transform, &CollidableDetails), (With<Collidable>, Without<Player>)>,
     time: Res<Time>
 ) {
@@ -133,20 +131,28 @@ fn player_movement_system(
                 flag_x = match metadata.c_type{
                     CollidableType::Wall => false,
                     CollidableType::Door => {
-                        if player_state.key_number > 0{
-                            player_state.key_number -= 1;
-                            commands.entity(labyrinth_state.entities[metadata.id]).despawn();
-                            true
-                        }else{
-                            false
+                        let my_position = labyrinth_state.maze.get_state_mut().position.clone();
+                        let door_position = (my_position.0, (my_position.1 as i32 + velocity.x.signum() as i32) as usize);
+                        match labyrinth_state.maze.get_state_mut().unlock_door(&door_position){
+                            UnlockDoor::Unlocked => {
+                                commands.entity(labyrinth_state.entities[metadata.id]).despawn();
+                                true
+                            },
+                            _ => {
+                                false
+                            }
                         }
                     },
                     CollidableType::Key => {
-                        player_state.key_number += 1;
+                        labyrinth_state.maze.get_state_mut().collect_key(&metadata.position);
                         commands.entity(labyrinth_state.entities[metadata.id]).despawn();
                         true
                     },
                     CollidableType::Exit => {
+                        true
+                    },
+                    CollidableType::Field => {
+                        labyrinth_state.maze.get_state_mut().move_to(&metadata.position);
                         true
                     }
                 };
@@ -159,20 +165,28 @@ fn player_movement_system(
                 flag_y = match metadata.c_type{
                     CollidableType::Wall => false,
                     CollidableType::Door => {
-                        if player_state.key_number > 0{
-                            player_state.key_number -= 1;
-                            commands.entity(labyrinth_state.entities[metadata.id]).despawn();
-                            true
-                        }else{
-                            false
+                        let my_position = labyrinth_state.maze.get_state_mut().position.clone();
+                        let door_position = ((my_position.0 as i32 - velocity.y.signum() as i32) as usize, my_position.1);
+                        match labyrinth_state.maze.get_state_mut().unlock_door(&door_position){
+                            UnlockDoor::Unlocked =>{
+                                commands.entity(labyrinth_state.entities[metadata.id]).despawn();
+                                true
+                            },
+                            _ => {
+                                false
+                            }
                         }
                     },
                     CollidableType::Key => {
-                        player_state.key_number += 1;
+                        labyrinth_state.maze.get_state_mut().collect_key(&metadata.position);
                         commands.entity(labyrinth_state.entities[metadata.id]).despawn();
                         true
                     },
                     CollidableType::Exit => {
+                        true
+                    },
+                    CollidableType::Field => {
+                        labyrinth_state.maze.get_state_mut().move_to(&metadata.position);
                         true
                     }
                 };
@@ -192,7 +206,7 @@ fn player_movement_system(
 fn inventory_sync_system(
     query: Query<Entity, With<Inventory>>,
     mut commands: Commands,
-    player_state: Res<PlayerState>,
+    mut labyrinth_state: ResMut<LabyrinthState>,
     game_textures: Res<GameTextures>
 ){
     for e in query.iter(){
@@ -200,7 +214,7 @@ fn inventory_sync_system(
         .entity(e)
         .insert(TextBundle{
             text: Text::from_section(
-                format!("   Keys: {}", player_state.key_number),
+                format!("   Keys: {}", labyrinth_state.maze.get_state_mut().keys),
                 TextStyle {
                     font_size: 30.,
                     color: Color::rgb(0.,0.,0.),
@@ -216,13 +230,13 @@ fn inventory_sync_system(
 fn setup_inventory_system(
     mut commands: Commands,
     game_textures: Res<GameTextures>,
-    player_state: ResMut<PlayerState>
+    mut labyrinth_state: ResMut<LabyrinthState>
 ){
     commands.spawn_empty()
     .insert(Inventory)
     .insert(TextBundle{
         text: Text::from_section(
-            format!("   Keys: {}", player_state.key_number),
+            format!("   Keys: {}", labyrinth_state.maze.get_state_mut().keys),
             TextStyle {
                 font_size: 30.,
                 color: Color::rgb(0.,0.,0.),

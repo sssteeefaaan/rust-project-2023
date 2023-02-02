@@ -1,7 +1,7 @@
 pub mod field;
 pub mod state;
 
-use std::{fmt::Display, io::{Error, ErrorKind}, collections::{HashMap, HashSet, VecDeque}};
+use std::{fmt::Display, io::{Error, ErrorKind}, collections::{HashMap, HashSet, VecDeque}, thread, sync::{Mutex, Arc, mpsc}};
 
 use crate::{utilities::read_binary};
 use field::Field;
@@ -23,8 +23,7 @@ pub struct Maze {
     pub dimensions: (usize, usize),
     pub start: (usize, usize),
     pub exits: HashSet<(usize, usize)>,
-    pub keys: u8,
-    pub shortest: Option<Vec<(usize, usize)>>
+    pub state: Option<State>
 }
 
 impl Default for Maze{
@@ -34,8 +33,7 @@ impl Default for Maze{
             dimensions: (DEFAULT_ROWS, DEFAULT_COLUMNS),
             start: (0, 0),
             exits: HashSet::new(),
-            keys: 0,
-            shortest: None
+            state: None
         }
     }
 }
@@ -44,7 +42,6 @@ impl Display for Maze{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut output = format!("Dimensions: ({}, {})\n", self.dimensions.0, self.dimensions.1);
         output += format!("Exit count: ({})\n", self.exits.len()).as_str();
-        output += format!("Keys: {}\n", self.keys).as_str();
         output += "Field data:";
         for (row_index, row) in self.fields.iter().enumerate(){
             output += format!("\nRow[{row_index}]: ").as_str();
@@ -104,7 +101,6 @@ impl Maze{
                 }
                 if (key & DEFAULT_KEY) == DEFAULT_KEY{
                     field.key = true;
-                    maze.keys += 1;
                 }
                 if (end & DEFAULT_END) == DEFAULT_END{
                     field.exit = true;
@@ -117,51 +113,9 @@ impl Maze{
         if maze.exits.len() < 1 {
             Err(Error::new(ErrorKind::InvalidInput, "Maze doesn't have an exit!"))
         }else{
+            maze.state = Some(State::create_from_maze(&maze));
             Ok(maze)
         }
-    }
-
-    pub fn convert_to_graph(&self) -> HashMap<(usize, usize),(bool, HashSet<(usize, usize)>, HashSet<(usize, usize)>)>{
-        let mut ret = HashMap::new();
-        for (row_index, row) in self.fields.iter().enumerate(){
-            for (col_index, field) in row.iter().enumerate(){
-                ret.insert((row_index, col_index), (field.key, HashSet::new(), HashSet::new()));
-                for (i, w) in field.walls.iter().enumerate(){
-                    if !*w{
-                        ret
-                        .get_mut(&(row_index, col_index))
-                        .unwrap()
-                        .1
-                        .insert(
-                            match i {
-                                0 => (row_index, col_index - 1),
-                                1 => (row_index, col_index + 1),
-                                2 => (row_index - 1, col_index),
-                                _ => (row_index + 1, col_index)
-                            }
-                        );
-                    }
-                }
-                for (i, d) in field.doors.iter().enumerate(){
-                    if *d{
-                        ret
-                        .get_mut(&(row_index, col_index))
-                        .unwrap()
-                        .2
-                        .insert(
-                            match i {
-                                0 => (row_index, col_index - 1),
-                                1 => (row_index, col_index + 1),
-                                2 => (row_index - 1, col_index),
-                                _ => (row_index + 1, col_index)
-                            }
-                        );
-                    }
-                }
-            }
-        }
-
-        return ret;
     }
 
     fn get_doors_graph(&self)->HashMap<(usize,usize), HashSet<(usize,usize)>>{
@@ -226,55 +180,116 @@ impl Maze{
         return ret;
     }
 
-    fn search_for_shortest_path(&self)->Vec<(usize, usize)>{
-        let mut ret = vec![self.start];
-        if self.exits.contains(&self.start){return ret;}
+    #[allow(dead_code)]
+    fn search_for_shortest_path(&self)->Option<Vec<(usize, usize)>>{
+        if self.exits.contains(&self.start){ return Some(vec![self.start]); }
 
         let walls_graph = self.get_walls_graph();
 
-        let mut start = Vec::new();
-        start.push(self.start);
-
         let state = State::create_from_maze(self);
-        let mut history = Vec::new();
-        history.push(state);
+        let mut state_history = Vec::new();
+        state_history.push(state);
 
         let mut queue = VecDeque::new();
-        queue.push_back((start, history));
+        queue.push_back(state_history);
 
-        'while_loop:
         while !queue.is_empty(){
-            let current = queue.pop_front().unwrap();
-            let current_path = current.0;
-            let current_history = current.1;
+            let current_history = queue.pop_front().unwrap();
             let current_state = current_history.last().unwrap();
             let current_position = current_state.position;
 
             let neighbours = walls_graph.get(&current_position).unwrap();
 
             for node in neighbours{
-                let (success, new_state) = current_state.transfer_state(node);
-                if success && !current_history.contains(&new_state){
-                    let mut new_path = current_path.clone();
-                    new_path.push(node.clone());
-                    if self.exits.contains(node){
-                        ret = new_path;
-                        break 'while_loop;
+                let potential_new_state = current_state.transfer_state(node);
+                if let Some(new_state) = potential_new_state{
+                    if !current_history.contains(&new_state){
+                        let mut new_history = current_history.clone();
+                        new_history.push(new_state);
+                        if self.exits.contains(node){
+                            return Some(
+                                new_history.iter()
+                                            .map(|state|{ state.position })
+                                            .collect()
+                                )
+                        }
+                        queue.push_back(new_history);
                     }
-                    let mut new_history = current_history.clone();
-                    new_history.push(new_state);
-                    queue.push_back((new_path, new_history));
                 }
             }
         }
-        ret
+        None
     }
 
-    pub fn get_shortest_path(&mut self)->Vec<(usize, usize)>{
-        if self.shortest.is_none(){
-            self.shortest = Some(self.search_for_shortest_path());
+    pub fn search_for_shortest_path_parallel(&self, state: State) -> Option<Vec<(usize, usize)>> {
+        let start_position = state.position.clone();
+
+        if self.exits.contains(&start_position){ return Some(vec![start_position]); }
+
+        let walls_graph = self.get_walls_graph();
+
+        let mut state_history = Vec::new();
+        state_history.push(state);
+
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        queue.lock().unwrap().push_back(state_history);
+
+        while !queue.lock().unwrap().is_empty(){
+            let current_history = queue.lock().unwrap().pop_front().unwrap();
+            let current_state = current_history.last().unwrap();
+            let current_position = current_state.position;
+
+            let neighbours = walls_graph.get(&current_position).unwrap();
+
+            let mut threads = vec![];
+            let (tx, rx) = mpsc::channel();
+
+            for node in neighbours{
+                let mut new_history = current_history.clone();
+                let node_copy = node.clone();
+                let exists = self.exits.clone();
+                let queue_copy = queue.clone();
+                let solutions = tx.clone();
+                threads.push(thread::spawn(move ||{
+                    let potential_new_state = new_history.last().unwrap().transfer_state(&node_copy);
+                    if let Some(new_state) = potential_new_state{
+                        if !new_history.contains(&new_state){
+                            new_history.push(new_state);
+                            if exists.contains(&node_copy){
+                                let _ = solutions.send(new_history.iter().map(|state| { state.position.clone() } ).collect());
+                            }
+                            queue_copy.lock().unwrap().push_back(new_history);
+                        }
+                    }
+                }));
+            }
+
+            for t in threads{
+                t.join().unwrap();
+            }
+
+            for s in rx.try_iter(){
+                return Some(s);
+            }
         }
-        self.shortest.clone().unwrap()
+        None
+    }
+
+    pub fn get_state_mut<'a>(&'a mut self) -> &'a mut State{
+        if self.state.is_none(){
+            self.state = Some(State::create_from_maze(self));
+        }
+        self.state.as_mut().unwrap()
+    }
+
+    pub fn get_shortest_path(&mut self) -> Option<Vec<(usize, usize)>>{
+        if self.state.is_none(){
+            self.state = Some(State::create_from_maze(self));
+        }
+        if self.state.as_ref().unwrap().shortest_path.is_none(){
+            self.state.as_mut().unwrap().shortest_path = self.search_for_shortest_path_parallel(self.state.as_ref().unwrap().clone())
+        }
+        self.state.as_ref().unwrap().shortest_path.clone()
     }
 }
 

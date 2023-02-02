@@ -31,7 +31,7 @@ const KEY_SPRITE : &str = "key.png";
 const KEY_SCALE: f32 = 0.5;
 
 const FRAME_SCALE: f32 = 0.1;
-const WALL_SCALE: f32 = 0.01;
+const WALL_SCALE: f32 = 0.025;
 
 const BASE_SPEED: f32 = 500.;
 
@@ -46,7 +46,7 @@ pub fn display(maze: Option<Maze>){
     ..Default::default()
     }))
     .add_plugin(PlayerPlugin)
-    .add_plugin(LabyrinthPlugin{maze_instance: maze})
+    .add_plugin(LabyrinthPlugin{ maze_instance: maze })
     .add_startup_system(setup_system)
 	.add_system(window_resize_system)
     .run();
