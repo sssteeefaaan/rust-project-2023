@@ -238,7 +238,7 @@ fn setup_inventory_system(
     .insert(Inventory)
     .insert(TextBundle{
         text: Text::from_section(
-            format!("   Keys: {}", maze_visual_state.maze.get_state_mut().keys),
+            format!("   Keys collected: {}", maze_visual_state.maze.get_state_mut().keys),
             TextStyle {
                 font_size: 30.,
                 color: Color::rgb(0.,0.,0.),
