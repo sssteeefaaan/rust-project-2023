@@ -1,13 +1,11 @@
 pub mod field;
 pub mod state;
 
-use std::{fmt::Display, io::{Error, ErrorKind}, collections::{HashMap, HashSet, VecDeque}, thread::spawn, sync::{Mutex, Arc, mpsc}};
+use std::{fmt::Display, io::{Error, ErrorKind}, collections::{HashMap, HashSet, VecDeque}, thread::spawn, sync::mpsc, time::Instant};
 
-use crate::{utilities::read_binary};
-use field::Field;
+use crate::utilities::read_binary;
 
-use self::state::State;
-
+use self::{field::Field, state::State};
 
 const DEFAULT_ROWS: usize = 6;
 const DEFAULT_COLUMNS: usize = 9;
@@ -275,35 +273,41 @@ impl Maze{
         let mut state_history = Vec::new();
         state_history.push(state);
 
-        let queue = Arc::new(Mutex::new(VecDeque::new()));
-        queue.lock().unwrap().push_back(state_history);
+        let mut queue = VecDeque::new();
+        queue.push_back(state_history);
 
-        while !queue.lock().unwrap().is_empty(){
-            let current_history = queue.lock().unwrap().pop_front().unwrap();
-            let current_state = Arc::new(current_history.last().unwrap().clone());
+        let (solutions_tx, solutions_rx) = mpsc::channel();
+        let (states_tx, states_rx) = mpsc::channel();
+
+        while !queue.is_empty(){
+            let current_history = queue.pop_front().unwrap();
+            let current_state = current_history.last().unwrap();
             let current_position = current_state.position;
 
             let neighbours = walls_graph.get(&current_position).unwrap();
 
             let mut threads = vec![];
-            let (tx, rx) = mpsc::channel();
 
             for node in neighbours{
                 let mut new_history = current_history.clone();
-                let new_state = current_state.clone();
                 let node_copy = node.clone();
                 let exists = self.exits.clone();
-                let queue_copy = queue.clone();
-                let solutions = tx.clone();
+                let solutions = solutions_tx.clone();
+                let states = states_tx.clone();
                 threads.push(spawn(move ||{
-                    let potential_new_state = new_state.transfer_state(&node_copy);
+                    let potential_new_state = new_history.last().unwrap().transfer_state(&node_copy);
                     if let Some(new_state) = potential_new_state{
                         if !new_history.contains(&new_state){
                             new_history.push(new_state);
                             if exists.contains(&node_copy){
-                                let _ = solutions.send(new_history.iter().map(|state| { state.position.clone() } ).collect());
+                                solutions.send(
+                                    new_history.iter()
+                                    .map(|state| { state.position } )
+                                    .collect()
+                                ).expect("Couldn't send solution to the channel!");
                             }
-                            queue_copy.lock().unwrap().push_back(new_history);
+                            states.send(new_history)
+                                .expect("Couldn't send history to the channel!");
                         }
                     }
                 }));
@@ -313,11 +317,28 @@ impl Maze{
                 t.join().unwrap();
             }
 
-            for s in rx.try_iter(){
-                return Some(s);
+            for solution in solutions_rx.try_iter(){
+                return Some(solution);
+            }
+
+            for state in states_rx.try_iter(){
+                queue.push_back(state);
             }
         }
         None
+    }
+
+    pub fn compare_times_for_path_search(&mut self){
+        let mut now;
+        let state = self.get_state_mut().clone();
+
+        now = Instant::now();
+        self.search_for_shortest_path(state.clone());
+        println!("Sequential time taken: {}", now.elapsed().as_secs_f64());
+
+        now = Instant::now();
+        self.search_for_shortest_path_parallel(state);
+        println!("Parallel time taken: {}", now.elapsed().as_secs_f64());
     }
 
     pub fn get_state_mut<'a>(&'a mut self) -> &'a mut State{

@@ -15,7 +15,9 @@ fn main() -> Result<(), Error>{
 
     convert_txt_to_bin(&txt_file_path, &bin_file_path);
 
-    let m = Maze::parse_from_file(&bin_file_path)?;
+    let mut m = Maze::parse_from_file(&bin_file_path)?;
+
+    m.compare_times_for_path_search();
 
     display(Some(m));
 
