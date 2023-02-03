@@ -1,3 +1,5 @@
+// Stefan Aleksić E2-42-2022
+
 pub mod utilities;
 pub mod maze;
 pub mod visualize;
